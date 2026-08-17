@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FC2012 - Browser Edition</title>
+<style>
+  :root{
+    --bg:#0e1630; --panel:#141d3f; --panel2:#1b2650; --accent:#39ff88;
+    --gold:#ffc107; --red:#ff4d4d; --blue:#4dc3ff; --text:#ffffff;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; font-family:Arial, Helvetica, sans-serif; background:var(--bg); color:var(--text);
+    min-height:100vh; overflow-x:hidden;
+  }
+  #app{ max-width:900px; margin:0 auto; min-height:100vh; display:flex; flex-direction:column; }
+  header{
+    display:flex; justify-content:space-between; align-items:center;
+    padding:10px 16px; background:var(--panel2); position:sticky; top:0; z-index:10;
+    box-shadow:0 2px 8px rgba(0,0,0,.4);
+  }
+  header .stat{ font-weight:bold; font-size:14px; }
+  header .coins{ color:var(--gold); }
+  header .xp{ color:var(--blue); }
+  main{ flex:1; padding:16px; }
+  h1{ text-align:center; font-size:28px; margin:10px 0 4px; }
+  h2{ text-align:center; font-size:20px; margin:6px 0 16px; color:#aab6e8; font-weight:normal; }
+  .btn{
+    display:block; width:100%; max-width:340px; margin:10px auto; padding:14px;
+    border:none; border-radius:10px; background:var(--panel2); color:var(--text);
+    font-size:16px; font-weight:bold; cursor:pointer; transition:transform .1s, background .15s;
+    box-shadow:0 3px 0 rgba(0,0,0,.35);
+  }
+  .btn:active{ transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.35); }
+  .btn.accent{ background:var(--accent); color:#04270f; }
+  .btn.gold{ background:var(--gold); color:#3a2a00; }
+  .btn.red{ background:var(--red); color:#3a0000; }
+  .btn.ghost{ background:transparent; border:2px solid #33407a; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(110px,1fr)); gap:12px; margin:16px 0; }
+  .card{
+    background:linear-gradient(160deg,#2a3466,#141d3f); border-radius:12px; padding:8px;
+    text-align:center; cursor:pointer; border:2px solid #33407a; position:relative;
+    transition:transform .15s;
+  }
+  .card:hover{ transform:translateY(-4px); }
+  .card.legend{ border-color:var(--gold); background:linear-gradient(160deg,#5a4200,#2a2000); }
+  .card.epic{ border-color:#c15dff; background:linear-gradient(160deg,#3a1e5c,#1c0f30); }
+  .card.rare{ border-color:var(--blue); background:linear-gradient(160deg,#12345c,#0c1c33); }
+  .card .rating{ font-size:22px; font-weight:bold; }
+  .card .pos{ font-size:12px; color:#aab6e8; }
+  .card .name{ font-size:12px; margin-top:4px; min-height:30px; }
+  .card .nation{ font-size:10px; color:#7887c2; }
+  .toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    background:var(--accent); color:#04270f; padding:10px 20px; border-radius:20px;
+    font-weight:bold; z-index:100; opacity:0; transition:opacity .3s;
+  }
+  .toast.show{ opacity:1; }
+  .panel{ background:var(--panel); border-radius:12px; padding:16px; margin:12px 0; }
+  .center{ text-align:center; }
+  #pk-canvas-wrap{ display:flex; justify-content:center; }
+  canvas{ background:#79c6e0; border-radius:8px; touch-action:none; max-width:100%; }
+  .scoreline{ font-size:20px; font-weight:bold; text-align:center; margin:10px 0; }
+  .backbtn{ position:sticky; top:52px; z-index:9; background:var(--bg); padding:6px 16px; }
+  .backbtn button{ background:none; border:none; color:#aab6e8; font-size:14px; cursor:pointer; }
+  .squad-slot{
+    display:flex; align-items:center; justify-content:space-between; background:var(--panel2);
+    padding:10px 14px; border-radius:8px; margin:6px 0; cursor:pointer;
+  }
+  .squad-slot .empty{ color:#7887c2; }
+  .matchbar{ display:flex; justify-content:space-between; align-items:center; font-size:15px; margin:4px 0; }
+  .field{ width:100%; height:140px; background:#3f8f3f; border-radius:8px; position:relative; overflow:hidden; margin:10px 0; }
+  .ball{ position:absolute; width:14px; height:14px; background:white; border-radius:50%; transition:left .5s, top .5s; }
+  footer{ text-align:center; padding:20px; color:#4a5590; font-size:12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="stat">👤 <span id="hdr-name">Player</span> <span id="hdr-level" style="color:#aab6e8;font-weight:normal;"></span></div>
+    <div class="stat coins">🪙 <span id="hdr-coins">0</span></div>
+    <div class="stat xp">⭐ <span id="hdr-xp">0</span> XP</div>
+  </header>
+  <main id="main"></main>
+  <footer>FC2012 Browser Edition — unofficial fan build</footer>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   FC2012 BROWSER EDITION
+   A browser recreation of the core loop of fc2012.py: packs,
+   squad building, matches, and the penalty shootout minigame.
+   Runs entirely client-side, no download or install needed.
+   ============================================================ */
+
+let PLAYERS = [];
+fetch('players.json').then(r=>r.json()).then(data=>{ PLAYERS = data; boot(); })
+  .catch(()=>{ PLAYERS = FALLBACK_PLAYERS; boot(); });
+
+// Small fallback set in case players.json fails to load, so the game
+// still works.
+const FALLBACK_PLAYERS = [
+  {name:"Ronaldo, Cristiano", rating:99, nation:"Portugal", club:994, pos:"ST"},
+  {name:"Messi, Lionel", rating:99, nation:"Argentina", club:948, pos:"ST"},
+  {name:"Doe, John", rating:65, nation:"England", club:12, pos:"CB"},
+];
+
+// ---------------- STATE ----------------
+const State = {
+  username: "Manager",
+  coins: 500,
+  xp: 0,
+  level: 1,
+  collection: [],   // owned cards
+  squad: Array(5).fill(null), // 5-a-side arcade squad
+};
+
+function loadState(){
+  try{
+    const raw = localStorageSafeGet('fc2012_save');
+    if(raw){
+      const s = JSON.parse(raw);
+      Object.assign(State, s);
+    }
+  }catch(e){}
+}
+function saveState(){
+  try{ localStorageSafeSet('fc2012_save', JSON.stringify(State)); }catch(e){}
+}
+// Wrapped so the game still works in sandboxed contexts without storage.
+function localStorageSafeGet(k){ try{ return window.localStorage.getItem(k);}catch(e){ return null; } }
+function localStorageSafeSet(k,v){ try{ window.localStorage.setItem(k,v);}catch(e){} }
+
+function addXp(n){
+  State.xp += n;
+  const needed = State.level*100;
+  while(State.xp >= needed){
+    State.xp -= needed;
+    State.level += 1;
+    toast(`🎉 Level up! Now level ${State.level}`);
+  }
+  updateHeader();
+}
+
+function updateHeader(){
+  document.getElementById('hdr-name').textContent = State.username;
+  document.getElementById('hdr-level').textContent = `Lv.${State.level}`;
+  document.getElementById('hdr-coins').textContent = State.coins.toLocaleString();
+  document.getElementById('hdr-xp').textContent = State.xp;
+}
+
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 1800);
+}
+
+// ---------------- CARD HELPERS ----------------
+function rarityClass(rating){
+  if(rating>=90) return 'legend';
+  if(rating>=80) return 'epic';
+  if(rating>=70) return 'rare';
+  return '';
+}
+function rarityLabel(rating){
+  if(rating>=90) return 'LEGEND';
+  if(rating>=80) return 'EPIC';
+  if(rating>=70) return 'RARE';
+  return 'COMMON';
+}
+function randPlayer(minRating){
+  const pool = minRating ? PLAYERS.filter(p=>p.rating>=minRating) : PLAYERS;
+  const p = pool[Math.floor(Math.random()*pool.length)];
+  return Object.assign({}, p, {uid: crypto.randomUUID ? crypto.randomUUID() : (Date.now()+Math.random())});
+}
+function makeCardEl(p, onClick){
+  const el = document.createElement('div');
+  el.className = 'card ' + rarityClass(p.rating);
+  el.innerHTML = `
+    <div class="rating">${p.rating}</div>
+    <div class="pos">${p.pos}</div>
+    <div class="name">${p.name.split(',').reverse().join(' ')}</div>
+    <div class="nation">${p.nation}</div>
+  `;
+  if(onClick) el.addEventListener('click', ()=>onClick(p));
+  return el;
+}
+
+// ---------------- NAVIGATION ----------------
+const main = document.getElementById('main');
+function render(html){ main.innerHTML = html; }
+function backBar(fn){
+  const bar = document.createElement('div');
+  bar.className='backbtn';
+  bar.innerHTML = `<button>&larr; Back to Menu</button>`;
+  bar.querySelector('button').onclick = fn;
+  return bar;
+}
+
+function boot(){
+  loadState();
+  updateHeader();
+  screenMenu();
+}
+
+// ---------------- MENU ----------------
+function screenMenu(){
+  render(`
+    <h1>⚽ FC2012</h1>
+    <h2>Browser Edition</h2>
+    <button class="btn accent" id="btn-store">🎁 Open Packs</button>
+    <button class="btn" id="btn-club">🃏 My Club (${State.collection.length})</button>
+    <button class="btn" id="btn-squad">📋 Squad Builder</button>
+    <button class="btn gold" id="btn-match">🏟️ Play Match</button>
+    <button class="btn" id="btn-pk">🥅 Penalty Shootout</button>
+    <button class="btn ghost" id="btn-rename">✏️ Set Manager Name</button>
+  `);
+  document.getElementById('btn-store').onclick = screenStore;
+  document.getElementById('btn-club').onclick = screenClub;
+  document.getElementById('btn-squad').onclick = screenSquad;
+  document.getElementById('btn-match').onclick = screenMatchSetup;
+  document.getElementById('btn-pk').onclick = screenPKSetup;
+  document.getElementById('btn-rename').onclick = ()=>{
+    const n = prompt("Manager name:", State.username);
+    if(n){ State.username = n.slice(0,20); saveState(); updateHeader(); }
+  };
+}
+
+// ---------------- STORE / PACKS ----------------
+const PACKS = [
+  {name:"Bronze Pack", cost:100, count:3, minRating:0,  desc:"3 players, common odds"},
+  {name:"Silver Pack", cost:250, count:3, minRating:65, desc:"3 players, better odds"},
+  {name:"Gold Pack",   cost:500, count:5, minRating:75, desc:"5 players, strong odds"},
+  {name:"Icon Pack",   cost:1200,count:1, minRating:90, desc:"Guaranteed 90+ legend"},
+];
+function screenStore(){
+  render('');
+  main.appendChild(backBar(screenMenu));
+  const h = document.createElement('h1'); h.textContent = "🎁 Store"; main.appendChild(h);
+  const grid = document.createElement('div');
+  grid.className='grid';
+  grid.style.gridTemplateColumns = 'repeat(auto-fill,minmax(180px,1fr))';
+  PACKS.forEach(pack=>{
+    const el = document.createElement('div');
+    el.className='panel center';
+    el.innerHTML = `<div style="font-size:40px;">📦</div>
+      <div style="font-weight:bold;font-size:16px;margin:6px 0;">${pack.name}</div>
+      <div style="font-size:12px;color:#aab6e8;margin-bottom:8px;">${pack.desc}</div>
+      <button class="btn gold" style="margin:0;">🪙 ${pack.cost}</button>`;
+    el.querySelector('button').onclick = ()=>openPack(pack);
+    grid.appendChild(el);
+  });
+  main.appendChild(grid);
+}
+
+function openPack(pack){
+  if(State.coins < pack.cost){ toast("Not enough coins!"); return; }
+  State.coins -= pack.cost;
+  const pulled = [];
+  for(let i=0;i<pack.count;i++){
+    const p = randPlayer(pack.minRating);
+    pulled.push(p);
+    State.collection.push(p);
+  }
+  addXp(pack.count*8);
+  saveState();
+  updateHeader();
+  showPackResults(pulled);
+}
+
+function showPackResults(pulled){
+  render('');
+  const h = document.createElement('h1'); h.textContent = "You Pulled:"; main.appendChild(h);
+  const grid = document.createElement('div'); grid.className='grid'; main.appendChild(grid);
+  pulled.sort((a,b)=>b.rating-a.rating).forEach(p=> grid.appendChild(makeCardEl(p)));
+  const btn = document.createElement('button');
+  btn.className='btn accent'; btn.textContent='Continue';
+  btn.onclick = screenStore;
+  main.appendChild(btn);
+  const btn2 = document.createElement('button');
+  btn2.className='btn ghost'; btn2.textContent='Back to Menu';
+  btn2.onclick = screenMenu;
+  main.appendChild(btn2);
+}
+
+// ---------------- CLUB (collection) ----------------
+function screenClub(){
+  render('');
+  main.appendChild(backBar(screenMenu));
+  const h = document.createElement('h1'); h.textContent = `🃏 My Club (${State.collection.length})`; main.appendChild(h);
+  if(State.collection.length===0){
+    const p = document.createElement('p'); p.className='center'; p.textContent = "No cards yet — open some packs!";
+    main.appendChild(p);
+    return;
+  }
+  const grid = document.createElement('div'); grid.className='grid'; main.appendChild(grid);
+  const sorted = [...State.collection].sort((a,b)=>b.rating-a.rating);
+  sorted.forEach(p=> grid.appendChild(makeCardEl(p)));
+}
+
+// ---------------- SQUAD BUILDER ----------------
+function screenSquad(){
+  render('');
+  main.appendChild(backBar(screenMenu));
+  const h = document.createElement('h1'); h.textContent = "📋 Squad Builder"; main.appendChild(h);
+  const sub = document.createElement('p'); sub.className='center'; sub.style.color='#aab6e8';
+  sub.textContent = "Pick 5 players from your club for arcade matches.";
+  main.appendChild(sub);
+
+  const wrap = document.createElement('div'); wrap.className='panel'; main.appendChild(wrap);
+  State.squad.forEach((card, idx)=>{
+    const slot = document.createElement('div');
+    slot.className='squad-slot';
+    slot.innerHTML = card
+      ? `<span>${card.rating} - ${card.name.split(',').reverse().join(' ')} (${card.pos})</span><span>✏️</span>`
+      : `<span class="empty">Slot ${idx+1} — tap to assign</span><span>+</span>`;
+    slot.onclick = ()=>pickSquadPlayer(idx);
+    wrap.appendChild(slot);
+  });
+
+  const avg = squadAverage();
+  const avgEl = document.createElement('p'); avgEl.className='center';
+  avgEl.innerHTML = `<b>Squad Rating: ${avg || '-'}</b>`;
+  main.appendChild(avgEl);
+}
+function squadAverage(){
+  const filled = State.squad.filter(Boolean);
+  if(filled.length===0) return null;
+  return Math.round(filled.reduce((a,c)=>a+c.rating,0)/filled.length);
+}
+function pickSquadPlayer(idx){
+  if(State.collection.length===0){ toast("Open packs to get players first!"); return; }
+  render('');
+  main.appendChild(backBar(screenSquad));
+  const h = document.createElement('h1'); h.textContent = `Choose Player for Slot ${idx+1}`; main.appendChild(h);
+  const grid = document.createElement('div'); grid.className='grid'; main.appendChild(grid);
+  const sorted = [...State.collection].sort((a,b)=>b.rating-a.rating);
+  sorted.forEach(p=>{
+    grid.appendChild(makeCardEl(p, (chosen)=>{
+      State.squad[idx] = chosen;
+      saveState();
+      screenSquad();
+    }));
+  });
+}
+
+// ---------------- MATCH SIMULATION ----------------
+function screenMatchSetup(){
+  const avg = squadAverage();
+  if(!avg){ toast("Build a squad first!"); screenSquad(); return; }
+  render('');
+  main.appendChild(backBar(screenMenu));
+  const h = document.createElement('h1'); h.textContent = "🏟️ Play Match"; main.appendChild(h);
+  const p = document.createElement('div'); p.className='panel center';
+  p.innerHTML = `<p>Your squad rating: <b>${avg}</b></p><p>Opponent will be generated to match your level.</p>`;
+  main.appendChild(p);
+  const btn = document.createElement('button'); btn.className='btn accent'; btn.textContent='Kick Off';
+  btn.onclick = playMatch;
+  main.appendChild(btn);
+}
+
+function playMatch(){
+  const avg = squadAverage();
+  const oppRating = Math.max(45, Math.min(99, avg + (Math.random()*20-10)));
+  render('');
+  const h = document.createElement('h1'); h.textContent = "⚽ Match in Progress"; main.appendChild(h);
+  const bar = document.createElement('div'); bar.className='matchbar';
+  bar.innerHTML = `<span>${State.username}</span><span id="clock">0'</span><span>Rivals FC</span>`;
+  main.appendChild(bar);
+  const field = document.createElement('div'); field.className='field';
+  const ball = document.createElement('div'); ball.className='ball'; ball.style.left='48%'; ball.style.top='50%';
+  field.appendChild(ball);
+  main.appendChild(field);
+  const score = document.createElement('div'); score.className='scoreline'; score.id='score'; score.textContent='0 - 0';
+  main.appendChild(score);
+  const log = document.createElement('div'); log.className='panel'; log.id='matchlog'; log.style.maxHeight='160px'; log.style.overflowY='auto';
+  main.appendChild(log);
+
+  let myScore=0, oppScore=0, minute=0;
+  const myStrength = avg, oppStrength = oppRating;
+
+  function addLog(txt){
+    const d = document.createElement('div'); d.textContent = txt; d.style.fontSize='13px'; d.style.margin='4px 0';
+    log.prepend(d);
+  }
+  function moveBall(){
+    ball.style.left = (20+Math.random()*60)+'%';
+    ball.style.top = (20+Math.random()*60)+'%';
+  }
+
+  const interval = setInterval(()=>{
+    minute += Math.ceil(Math.random()*8)+3;
+    if(minute>90) minute=90;
+    document.getElementById('clock').textContent = minute+"'";
+    moveBall();
+    // chance of an event this tick
+    const roll = Math.random()*100;
+    const myChance = 8 + (myStrength-oppStrength)*0.4;
+    if(roll < Math.max(2,myChance)){
+      myScore++;
+      addLog(`⚽ ${minute}' GOAL! ${State.username} scores!`);
+    } else if(roll < Math.max(4,myChance)+8){
+      addLog(`${minute}' Rivals FC win the ball back.`);
+    } else if(roll > 100-Math.max(2,8-(myStrength-oppStrength)*0.4)){
+      oppScore++;
+      addLog(`😬 ${minute}' Rivals FC score!`);
+    }
+    document.getElementById('score').textContent = `${myScore} - ${oppScore}`;
+    if(minute>=90){
+      clearInterval(interval);
+      setTimeout(()=>finishMatch(myScore,oppScore), 600);
+    }
+  }, 550);
+}
+
+function finishMatch(myScore, oppScore){
+  let outcome, reward, xp;
+  if(myScore>oppScore){ outcome="VICTORY!"; reward=Math.floor(Math.random()*200)+200; xp=30; }
+  else if(myScore<oppScore){ outcome="DEFEAT"; reward=Math.floor(Math.random()*80)+40; xp=10; }
+  else { outcome="DRAW"; reward=Math.floor(Math.random()*100)+100; xp=18; }
+  State.coins += reward;
+  addXp(xp);
+  saveState();
+  render('');
+  const h = document.createElement('h1'); h.textContent = "Full Time"; main.appendChild(h);
+  const p = document.createElement('div'); p.className='panel center';
+  p.innerHTML = `<div class="scoreline">${myScore} - ${oppScore}</div>
+    <div style="font-size:22px;font-weight:bold;color:${myScore>=oppScore?'var(--accent)':'var(--red)'};margin:10px 0;">${outcome}</div>
+    <div>Rewards: +${reward} coins, +${xp} XP</div>`;
+  main.appendChild(p);
+  const btn = document.createElement('button'); btn.className='btn accent'; btn.textContent='Play Again';
+  btn.onclick = playMatch;
+  main.appendChild(btn);
+  const btn2 = document.createElement('button'); btn2.className='btn ghost'; btn2.textContent='Main Menu';
+  btn2.onclick = screenMenu;
+  main.appendChild(btn2);
+}
+
+// ---------------- PENALTY SHOOTOUT ----------------
+function screenPKSetup(){
+  render('');
+  main.appendChild(backBar(screenMenu));
+  const h = document.createElement('h1'); h.textContent = "🥅 Penalty Shootout"; main.appendChild(h);
+  const p = document.createElement('div'); p.className='panel center';
+  p.innerHTML = `<p>Best of 5 kicks. Swipe/drag on the ball to aim and power your shot.</p>`;
+  main.appendChild(p);
+  const btn = document.createElement('button'); btn.className='btn accent'; btn.textContent='Start Shootout';
+  btn.onclick = ()=> startShootout();
+  main.appendChild(btn);
+}
+
+function startShootout(){
+  const pkState = {
+    round:1, maxRounds:5, myScore:0, oppScore:0, phase:'aim', turn:'me'
+  };
+  renderPKScreen(pkState);
+}
+
+function renderPKScreen(pk){
+  render('');
+  const h = document.createElement('h1'); h.textContent = "🥅 Penalty Shootout"; main.appendChild(h);
+  const score = document.createElement('div'); score.className='scoreline';
+  score.textContent = `${State.username} ${pk.myScore} - ${pk.oppScore} Rivals FC   (Kick ${pk.round}/${pk.maxRounds})`;
+  main.appendChild(score);
+
+  const status = document.createElement('div'); status.className='center'; status.id='pk-status';
+  status.style.margin='8px 0'; status.style.minHeight='20px'; status.style.fontWeight='bold';
+  status.textContent = pk.turn==='me' ? "Drag the ball to aim, release to shoot!" : "Rivals FC are stepping up...";
+  main.appendChild(status);
+
+  const wrap = document.createElement('div'); wrap.id='pk-canvas-wrap'; main.appendChild(wrap);
+  const canvas = document.createElement('canvas');
+  canvas.width = 360; canvas.height = 320;
+  wrap.appendChild(canvas);
+  drawPKScene(canvas, {ballX:180, ballY:270, keeperX:180});
+
+  if(pk.turn==='me'){
+    setupPKInput(canvas, pk);
+  } else {
+    setTimeout(()=>opponentKick(pk, canvas), 900);
+  }
+}
+
+function drawPKScene(canvas, opts){
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0,0,w,h);
+  // sky
+  ctx.fillStyle = '#79c6e0'; ctx.fillRect(0,0,w,h);
+  // pitch
+  ctx.fillStyle = '#3f8f3f'; ctx.fillRect(0,120,w,h-120);
+  // goal
+  const goalLeft=60, goalRight=300, goalTop=60, goalBottom=140;
+  ctx.strokeStyle='white'; ctx.lineWidth=6;
+  ctx.strokeRect(goalLeft, goalTop, goalRight-goalLeft, goalBottom-goalTop);
+  // net lines
+  ctx.strokeStyle='rgba(255,255,255,.4)'; ctx.lineWidth=1;
+  for(let x=goalLeft; x<=goalRight; x+=16){ ctx.beginPath(); ctx.moveTo(x,goalTop); ctx.lineTo(x,goalBottom); ctx.stroke(); }
+  for(let y=goalTop; y<=goalBottom; y+=12){ ctx.beginPath(); ctx.moveTo(goalLeft,y); ctx.lineTo(goalRight,y); ctx.stroke(); }
+  // keeper
+  const kx = opts.keeperX ?? 180;
+  ctx.fillStyle = '#ffd400';
+  ctx.fillRect(kx-14, goalTop+30, 28, 45);
+  ctx.beginPath(); ctx.arc(kx, goalTop+24, 12, 0, Math.PI*2); ctx.fill();
+  // ball
+  ctx.beginPath();
+  ctx.arc(opts.ballX, opts.ballY, 10, 0, Math.PI*2);
+  ctx.fillStyle='white'; ctx.fill();
+  ctx.strokeStyle='#333'; ctx.lineWidth=1; ctx.stroke();
+  return {goalLeft, goalRight, goalTop, goalBottom};
+}
+
+function setupPKInput(canvas, pk){
+  let dragging=false, startX=0, startY=0, curX=0, curY=0;
+  const ballStartX = 180, ballStartY = 270;
+
+  function getPos(e){
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX-rect.left) * (canvas.width/rect.width), y:(clientY-rect.top) * (canvas.height/rect.height) };
+  }
+  function redraw(){
+    drawPKScene(canvas, {ballX:ballStartX, ballY:ballStartY, keeperX:180});
+    if(dragging){
+      const ctx = canvas.getContext('2d');
+      ctx.strokeStyle = '#ffc107'; ctx.lineWidth=3;
+      ctx.beginPath(); ctx.moveTo(startX,startY); ctx.lineTo(curX,curY); ctx.stroke();
+    }
+  }
+  function down(e){ dragging=true; const p=getPos(e); startX=p.x; startY=p.y; curX=p.x; curY=p.y; redraw(); }
+  function move(e){ if(!dragging) return; const p=getPos(e); curX=p.x; curY=p.y; redraw(); e.preventDefault(); }
+  function up(e){
+    if(!dragging) return;
+    dragging=false;
+    const dx = startX-curX, dy = startY-curY; // drag up/away = shoot direction
+    const power = Math.min(1, Math.hypot(dx,dy)/140);
+    if(power < 0.15){ redraw(); return; } // too weak, ignore
+    const aimX = 0.5 + Math.max(-0.5,Math.min(0.5, dx/140)); // 0..1 across goal
+    const aimY = Math.max(0,Math.min(1, 1-(dy/140))); // 0=low 1=high, inverted since dragging up shoots
+    canvas.removeEventListener('mousedown',down);
+    canvas.removeEventListener('mousemove',move);
+    canvas.removeEventListener('mouseup',up);
+    canvas.removeEventListener('touchstart',down);
+    canvas.removeEventListener('touchmove',move);
+    canvas.removeEventListener('touchend',up);
+    animateShot(canvas, pk, aimX, aimY, power);
+  }
+  canvas.addEventListener('mousedown',down);
+  canvas.addEventListener('mousemove',move);
+  canvas.addEventListener('mouseup',up);
+  canvas.addEventListener('touchstart',down,{passive:true});
+  canvas.addEventListener('touchmove',move,{passive:false});
+  canvas.addEventListener('touchend',up);
+}
+
+function animateShot(canvas, pk, aimX, aimY, power){
+  const goalLeft=60, goalRight=300, goalTop=60, goalBottom=140;
+  const targetX = goalLeft + aimX*(goalRight-goalLeft);
+  const targetY = goalBottom - aimY*(goalBottom-goalTop);
+  const startX = 180, startY = 270;
+
+  // keeper dives toward a guess - biased somewhat toward the actual target
+  // to keep it fair but beatable, with some randomness.
+  const keeperGuessX = targetX + (Math.random()*140-70);
+
+  let frame=0; const totalFrames=26;
+  function step(){
+    frame++;
+    const t = frame/totalFrames;
+    const bx = startX + (targetX-startX)*t;
+    const by = startY + (targetY-startY)*t;
+    const kx = 180 + (Math.max(goalLeft+20,Math.min(goalRight-20,keeperGuessX))-180)*Math.min(1,t*1.6);
+    drawPKScene(canvas, {ballX:bx, ballY:by, keeperX:kx});
+    if(frame<totalFrames){
+      requestAnimationFrame(step);
+    } else {
+      resolveShot(canvas, pk, targetX, keeperGuessX, power);
+    }
+  }
+  step();
+}
+
+function resolveShot(canvas, pk, targetX, keeperGuessX, power){
+  const goalLeft=60, goalRight=300;
+  const dist = Math.abs(targetX-keeperGuessX);
+  const missedEntirely = power > 0.95 && Math.random()<0.12; // blazed over
+  let scored;
+  if(missedEntirely){ scored=false; }
+  else { scored = dist > 42 || Math.random() < 0.2; }
+
+  const statusEl = document.getElementById('pk-status');
+  if(pk.turn==='me'){
+    if(scored){ pk.myScore++; statusEl.textContent = "⚽ GOAL!"; }
+    else { statusEl.textContent = missedEntirely ? "😬 Blazed over the bar!" : "🧤 SAVED by the keeper!"; }
+  }
+  setTimeout(()=> advancePK(pk), 1400);
+}
+
+function opponentKick(pk, canvas){
+  const scored = Math.random() < 0.72;
+  const statusEl = document.getElementById('pk-status');
+  const targetX = 60 + Math.random()*240;
+  drawPKScene(canvas, {ballX:targetX, ballY:80, keeperX: scored ? 180 : targetX});
+  if(scored){ pk.oppScore++; statusEl.textContent = "😬 Rivals FC score!"; }
+  else { statusEl.textContent = "🧤 Saved! Rivals FC miss!"; }
+  setTimeout(()=> advancePK(pk), 1400);
+}
+
+function advancePK(pk){
+  if(pk.turn==='me'){
+    pk.turn='opp';
+  } else {
+    pk.turn='me';
+    pk.round++;
+  }
+  if(pk.round > pk.maxRounds && pk.myScore !== pk.oppScore){
+    finishShootout(pk); return;
+  }
+  if(pk.round > pk.maxRounds && pk.myScore === pk.oppScore){
+    // sudden death, keep going one more round each
+    pk.maxRounds++;
+  }
+  renderPKScreen(pk);
+}
+
+function finishShootout(pk){
+  let outcome, reward, xp;
+  if(pk.myScore>pk.oppScore){ outcome=`${State.username.toUpperCase()} WINS ON PENALTIES!`; reward=Math.floor(Math.random()*200)+300; xp=25; }
+  else { outcome="RIVALS FC WIN ON PENALTIES"; reward=Math.floor(Math.random()*100)+100; xp=10; }
+  State.coins += reward;
+  addXp(xp);
+  saveState();
+  render('');
+  const h = document.createElement('h1'); h.textContent = "SHOOTOUT OVER"; main.appendChild(h);
+  const p = document.createElement('div'); p.className='panel center';
+  p.innerHTML = `<div class="scoreline">${State.username} ${pk.myScore} - ${pk.oppScore} Rivals FC</div>
+    <div style="font-size:20px;font-weight:bold;color:var(--gold);margin:10px 0;">${outcome}</div>
+    <div>Rewards: +${reward} coins, +${xp} XP</div>`;
+  main.appendChild(p);
+  const btn = document.createElement('button'); btn.className='btn accent'; btn.textContent='Shoot Again';
+  btn.onclick = startShootout;
+  main.appendChild(btn);
+  const btn2 = document.createElement('button'); btn2.className='btn ghost'; btn2.textContent='Main Menu';
+  btn2.onclick = screenMenu;
+  main.appendChild(btn2);
+}
+</script>
+</body>
+</html>
